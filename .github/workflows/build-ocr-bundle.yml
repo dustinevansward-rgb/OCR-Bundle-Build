@@ -1,0 +1,47 @@
+name: Build OCR Bundle
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        debian: [bullseye, bookworm]
+    runs-on: ubuntu-latest
+    container:
+      image: debian:${{ matrix.debian }}
+    steps:
+      - name: Show OS info
+        run: |
+          cat /etc/os-release
+          uname -m
+          ldd --version | head -1
+
+      - name: Install tesseract and poppler
+        run: |
+          apt-get update
+          apt-get install -y tesseract-ocr poppler-utils
+
+      - name: Locate binaries and dependencies
+        run: |
+          which tesseract pdftoppm pdftocairo
+          ldd $(which tesseract) $(which pdftoppm) $(which pdftocairo) 2>/dev/null | grep "=>" | awk '{print $3}' | sort -u > /tmp/libs.txt
+          cat /tmp/libs.txt
+
+      - name: Package bundle
+        run: |
+          mkdir -p /tmp/ocr-bundle/bin /tmp/ocr-bundle/lib /tmp/ocr-bundle/tessdata
+          cp $(which tesseract) $(which pdftoppm) $(which pdftocairo) /tmp/ocr-bundle/bin/
+          cp $(cat /tmp/libs.txt) /tmp/ocr-bundle/lib/ 2>/dev/null || true
+          cp /usr/share/tesseract-ocr/*/tessdata/eng.traineddata /tmp/ocr-bundle/tessdata/ 2>/dev/null || true
+          cat /etc/os-release > /tmp/ocr-bundle/BUILD_INFO.txt
+          ldd --version | head -1 >> /tmp/ocr-bundle/BUILD_INFO.txt
+          tar -czf /tmp/ocr-bundle-${{ matrix.debian }}.tar.gz -C /tmp ocr-bundle
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocr-bundle-${{ matrix.debian }}
+          path: /tmp/ocr-bundle-${{ matrix.debian }}.tar.gz
